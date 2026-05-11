@@ -146,9 +146,6 @@ func login(c *gin.Context){
 		c.JSON(http.StatusForbidden,"Incorrect Credentials")
 		return
 	}
-	_,err=getToken(user.Email)
-	if err != nil {
-		//token expired
 		token, err := generateToken()
 		if err != nil {
 			c.JSON(500,"Token Revocation failed")
@@ -162,8 +159,6 @@ func login(c *gin.Context){
 		}
 		c.JSON(http.StatusOK,gin.H{"access_token":token,"revoked":true})
 		return
-	}
-	c.JSON(http.StatusOK,"Login Success")
 }
 func logout(c *gin.Context){
 	c.Set("email","")
@@ -184,19 +179,7 @@ func signUp(c *gin.Context){
 		c.JSON(http.StatusConflict,"User with provided email exists")
 		return
 	}
-	token, err := generateToken()
-	if err != nil {
-		c.JSON(500,"Token generation failed")
-		return
-	}
-	tokenHash := hashToken(token)
-	err=insertToken(tokenHash,user.Email)
-	if err != nil {
-		fmt.Println(err)
-		c.JSON(500,"Saving token failed")
-		return
-	}
-	c.JSON(http.StatusCreated,gin.H{"access_token":token})
+	c.JSON(http.StatusCreated,"Success")
 	os.Mkdir("./uploads/"+strings.Split(user.Email,"@")[0],0755)
 }
 func getUser(email string)(*User,bool){
