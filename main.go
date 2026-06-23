@@ -49,7 +49,7 @@ func main(){
 	gin.SetMode(gin.ReleaseMode)
 	initDb()
 	router:=gin.Default()
-	fmt.Println("Server Running on http://0.0.0.0:8080")
+	fmt.Println("Server Running on http://127.0.0.1:8080")
 	router.POST("/signUp",signUp)
 	router.POST("/login",login)
 	router.GET("/logout",logout)
@@ -65,9 +65,10 @@ func main(){
 			"size":size,
 		})
 	})
+	router.GET("/files/*filepath",authHandler(),getFile)
 	router.POST("/list",authHandler(),list)
-	router.POST("delete",authHandler(),delete)
-	err:=router.Run("0.0.0.0:8080")
+	router.DELETE("/delete",authHandler(),delete)
+	err:=router.Run(":8080")
 	if err!=nil{
 		fmt.Println("Error Running Server")
 	}
@@ -77,9 +78,14 @@ func initDb(){
 	db,err=sql.Open("mysql","root:root(9)@tcp(127.0.0.1:3306)/DropBox?parseTime=true")
 	if err!=nil{
 		fmt.Println("Error Opening Connection to Database")
-	}else{
-		fmt.Println("Connected to Database")
+		return
 	}
+	err=db.Ping()
+	if err != nil {
+		fmt.Println("Error Pinging Database")
+		return
+	}
+	fmt.Println("Connected to Database")
 }
 func generateString(x int) string{
 	var out=""
@@ -122,12 +128,21 @@ func authHandler()gin.HandlerFunc{
 		token:=authHeader[len(prefix):]
 		hashedToken:=hashToken(token)
 		session,err:=getSession(hashedToken)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusNotFound,"Session Not Found")
+			return
+		}
+		storedToken,err:=getToken(session.Email)
 		if err != nil{
 			c.AbortWithStatusJSON(http.StatusUnauthorized,"Token Expired or Non Existent")
 			return
 		}
-		c.Set("email",session.Email)
-		c.Next()
+		if storedToken==hashedToken{
+			c.Set("email",session.Email)
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusUnauthorized,"Token Expired or Non Existent")
 	}
 }
 func login(c *gin.Context){
@@ -148,16 +163,16 @@ func login(c *gin.Context){
 	}
 		token, err := generateToken()
 		if err != nil {
-			c.JSON(500,"Token Revocation failed")
+			c.JSON(500,"Token Generation failed")
 			return
 		}
 		tokenHash := hashToken(token)
 		err=insertToken(tokenHash,user.Email)
 		if err != nil {
-			c.JSON(500,"Saving revoked token failed")
+			c.JSON(500,"Saving Token failed")
 			return
 		}
-		c.JSON(http.StatusOK,gin.H{"access_token":token,"revoked":true})
+		c.JSON(http.StatusOK,gin.H{"access_token":token})
 		return
 }
 func logout(c *gin.Context){
@@ -242,7 +257,7 @@ func uploadFile(c *gin.Context){
 		return
 	}
 	email:=c.GetString("email")
-	fmt.Println(email," ",strings.Split(email,"@")[0]," ",cleanPath)
+	
 
 	err=c.SaveUploadedFile(file,"./uploads/"+strings.Split(email,"@")[0]+"/"+cleanPath+"/"+file.Filename);
 	if err != nil {
@@ -312,9 +327,11 @@ func list(c *gin.Context){
 	}
 	var result []gin.H
 	for _,entry:=range entries{
+		info,_:=entry.Info()
 		result = append(result, gin.H{
 			"name":entry.Name(),
 			"isDir":entry.IsDir(),
+			"time":info.ModTime().Local().Format("02 Jan 2006 15:04"),
 		})
 	}
 	c.JSON(http.StatusOK,result)
@@ -352,5 +369,24 @@ func delete(c *gin.Context){
 	}
 	sizeModify(email,-size)
 	c.JSON(http.StatusOK,"Deletion Success")
+}
+func getFile(c *gin.Context){
+	file:=c.Param("filepath")
+	file=filepath.Clean(file)
+	user:=strings.Split(c.GetString("email"),"@")[0]
+	fullPath:=filepath.Join("./uploads",user,file)
+
+	info,err:=os.Stat(fullPath)
+
+	if err != nil {
+		c.JSON(http.StatusNotFound,"Path Not Found")
+		return
+	}
+
+	if info.IsDir(){
+		c.JSON(http.StatusBadRequest,"Target is a directory not a file")
+		return
+	}
+	c.File(fullPath)
 }
 
